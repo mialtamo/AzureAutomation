@@ -1,15 +1,15 @@
 # Connect to Azure AD
-Connect-AzAccount
+Connect-AzAccount -Environment AzureUSGovernment
 $context = Get-AzContext
 $username = $context.Account
 Write-Host "Signed-in username is: $username" -ForegroundColor DarkYellow
-#Connect-MgGraph -Scopes "Application.ReadWrite.All"
+Connect-MgGraph -Scopes "User.Read.All" -Environment USGov
 
 # Define Global Variables
-$resourceGroupName = ""
-$location = ""
-$vnetName = ""
-$subnetName = ""
+$resourceGroupName = "AutomationTest-RSG"
+$location = "usgovarizona"
+$vnetName = "vnetauto"
+$subnetName = "default"
 $subscriptionId = ""
 ###############################
 
@@ -21,13 +21,13 @@ $Password = "P@ssword123!"  # Change to a secure password or pass it securely
 $CertificatePath = "$env:TEMP"
 
 # Define Key Vault Variables
-$keyVaultName = "KVTEST123"  # Must be globally unique
+$keyVaultName = "mialtamoKVTEST123"  # Must be globally unique
 $privateEndpointName = "TESTKV-PE"
 $secretName = "MySecret"
 $secretValue = "MySecretValue123!"
 
 # Define APIM Variables
-$apimServiceName = "my-apim-instance"
+$apimServiceName = "my-apim-instance-TESTMIALTAMO"
 $publisherEmail = "admin@example.com"
 $publisherName = "MyCompany"
 $skuName = "Premium"  # Use Basic, Standard, Premium as needed
@@ -36,7 +36,7 @@ $apimNamedValueName = "keyvaultNamedValue"
 $apimNamedValueDisplayName = "keyVaultNamedValueDisplayName"
 
 # Define Automation Runbook Variables
-$automationAccount = "myAutomationAccount"
+$automationAccount = "myAutomationAccountTEST"
 $runbookName = "MyRunbookTESTmialtamo" # Must be globally unique
 $runbookDescription = "This will create auto key rotation in Key Vault"
 $scheduleName = "RunEvery90Days"
@@ -119,6 +119,25 @@ $response
 Write-Host "[APIM] Successfully Updated API Management Access Keys""
 "@
 
+# Define Application Gateway Variables
+
+$appGwName = "MyAppGateway"
+$publicIPName = "MyAppGatewayPIP"
+$subnetPrefix = "10.1.0.0/24"
+$gwSubnetName = "default2"
+$frontendPort = 443
+$skuName = "WAF_v2"
+$skuTier = "WAF_v2"
+$capacity = 2
+$backendPoolName = "mybackendPool123"
+$frontendPortName = "myFrontEndPort123"
+$frontendGWName = "myFrontGWName123"
+$backendHTTPName = "BackendHTTPName123"
+$gwListenerName = "ListenerName123"
+$gwRoutingRuleName = "RoutingName123"
+$GWpfxPath = "$CertificatePath\$CertName.pfx"
+$GWpfxPassword = ConvertTo-SecureString -String "P@ssword123!" -AsPlainText -Force
+$GWcertName = "MyAppCert"
 
 ##############################################################################
 
@@ -181,9 +200,8 @@ $cert.Import($pfxPath, $securePwd, [System.Security.Cryptography.X509Certificate
 $certBase64 = [Convert]::ToBase64String($cert.RawData)
 
 sleep 5
-do {
 $updateApp = Get-MgApplication -Filter "DisplayName eq '$appName'"
-} while (-not $updateApp)
+
 
 Write-Host "[Start] Uploading Certificate to App Registration $appName" -ForegroundColor Green
 
@@ -307,6 +325,59 @@ $scriptContent | Out-File -FilePath $tempPathPS -Encoding UTF8 -Force
 Import-AzAutomationRunbook -AutomationAccountName $automationAccount -ResourceGroupName $resourceGroupName -Name $runbookName -Path $tempPathPS -Type PowerShell -Force
 Write-Host "[RESULt] ✅ Syccessfully uploaded PS Script to the automation Runbook" -ForegroundColor Green
 }
+
+$createGW = Read-Host "Do you want to create the Application Gateway? [Y/N]"
+
+if ($createGW -in @("Y", "y")) {
+Write-Host "[START] Creating Public IP for App Gateway" -ForegroundColor DarkCyan
+# Create Public IP
+$publicIPGW = New-AzPublicIpAddress -Name $publicIPName -ResourceGroupName $resourceGroupName -Location $location -AllocationMethod Static -Sku Standard
+$vnetGW = Get-AzVirtualNetwork -Name $vnetName -ResourceGroupName $resourceGroupName
+$subnetGW = Get-AzVirtualNetworkSubnetConfig -Name $gwSubnetName -VirtualNetwork $vnetGW
+$gwIPConfig = New-AzApplicationGatewayIPConfiguration -Name "appGwIpConfig" -Subnet $subnetGW
+Write-Host "[RESULT] ✅ Successfully Created Public IP for App Gateway" -ForegroundColor Green
+
+# Create Frontend IP Configuration
+Write-Host "[START] Creating App Gateway Configuration Details" -ForegroundColor DarkCyan
+$frontendIP = New-AzApplicationGatewayFrontendIPConfig -Name $frontendGWName -PublicIPAddress $publicIPGW
+
+# Create Frontend Port
+$frontendPortConfig = New-AzApplicationGatewayFrontendPort -Name $frontendPortName -Port $frontendPort
+
+# Create Backend Address Pool
+$backendPoolGW = New-AzApplicationGatewayBackendAddressPool -Name $backendPoolName
+
+# Create Backend HTTP Settings
+$backendHTTPSettings = New-AzApplicationGatewayBackendHttpSettings -Name $backendHTTPName -Port $frontendPort -Protocol Https -CookieBasedAffinity Disabled
+
+# Upload SSL Certificate
+$sslCertGW = New-AzApplicationGatewaySslCertificate -Name $GWcertName -CertificateFile $GWpfxPath -Password $GWpfxPassword
+
+
+# Create Listener
+$listener = New-AzApplicationGatewayHttpListener -Name $gwListenerName -FrontendIPConfiguration $frontendIP -FrontendPort $frontendPortConfig -Protocol Https -SslCertificate $sslCertGW
+
+# Create Rule
+$rule = New-AzApplicationGatewayRequestRoutingRule -Name $gwRoutingRuleName -RuleType Basic -HttpListener $listener -BackendAddressPool $backendPoolGW -BackendHttpSettings $backendHTTPSettings -Priority 100
+
+# Create WAF Config
+$wafConfig = New-AzApplicationGatewayWebApplicationFirewallConfiguration -Enabled $true -FirewallMode "Prevention" -RuleSetType "OWASP" -RuleSetVersion "3.2"
+
+Write-Host "[RESULT] ✅ Successfully Created Configuration file for App Gateway" -ForegroundColor Green
+
+Write-Host "[START] Creating App Gateway" -ForegroundColor DarkCyan
+
+# Create Application Gateway
+$appGw = New-AzApplicationGateway -Name $appGwName -ResourceGroupName $resourceGroupName -Location $location `
+  -BackendAddressPools $backendPoolGW -BackendHttpSettingsCollection $backendHTTPSettings `
+  -FrontendIPConfigurations $frontendIP -FrontendPorts $frontendPortConfig `
+  -GatewayIPConfigurations $gwIPConfig -HttpListeners $listener -RequestRoutingRules $rule `
+  -Sku @{Name=$skuName; Tier=$skuTier; Capacity=$capacity} -WebApplicationFirewallConfig $wafConfig -SslCertificates $sslCertGW
+
+Write-Host "[RESULT] ✅ Successfully Created Application Gateway" -ForegroundColor Green
+
+}
+
 sleep 2
 Write-Host "[END] ✅✅✅✅✅✅✅✅✅✅" -ForegroundColor DarkGreen
 Write-Host "[END] ✅ SUCCESSFULLY FINISHED ✅" -ForegroundColor DarkGreen
