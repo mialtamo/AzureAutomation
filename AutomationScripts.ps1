@@ -21,7 +21,7 @@ $Password = "P@ssword123!"  # Change to a secure password or pass it securely
 $CertificatePath = "$env:TEMP"
 
 # Define Key Vault Variables
-$keyVaultName = "mialtamoKVTEST123"  # Must be globally unique
+$keyVaultName = "miaKVTEST123"  # Must be globally unique
 $privateEndpointName = "TESTKV-PE"
 $secretName = "MySecret"
 $secretValue = "MySecretValue123!"
@@ -37,7 +37,7 @@ $apimNamedValueDisplayName = "keyVaultNamedValueDisplayName"
 
 # Define Automation Runbook Variables
 $automationAccount = "myAutomationAccountTEST"
-$runbookName = "MyRunbookTESTmialtamo" # Must be globally unique
+$runbookName = "MyRunbookTESTmia" # Must be globally unique
 $runbookDescription = "This will create auto key rotation in Key Vault"
 $scheduleName = "RunEvery90Days"
 $runbookType = "PowerShell"  # Options: PowerShell, Graph, Python2, Python3
